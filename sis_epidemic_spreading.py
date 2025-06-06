@@ -14,8 +14,8 @@ NUM_NODES = 1000
 # MS: The list of μ values
 MIS = [0.2, 0.4]
 
-# KAPAS: The values of k for the ER & BA models
-KAPAS = [4, 6]
+# KAPPAS: The values of k for the ER & BA models
+KAPPAS = [4, 6]
 
 # MODEL_TYPES: The available models
 MODEL_TYPES = ["ER", "BA"]
@@ -25,7 +25,7 @@ MODEL_TYPES = ["ER", "BA"]
 BETAS = np.arange(0, 0.3, 0.01)
 
 # COUNT_BETAS: The number of betas chosen
-COUNT_BETAS = 4
+COUNT_BETAS = 10
 
 # NUM_REPETITIONS: The number of repetitions of the simulation
 NUM_REPETITIONS = 100
@@ -70,7 +70,7 @@ class Simulation:
     """
 
     mi: "float"
-    kapa: "float"
+    kappa: "float"
     model: "nx.Graph"
     beta: "float"
     model_type: "str"
@@ -112,6 +112,7 @@ class Simulator:
             for _n in self.G.neighbors(node)
             if current_state[_n] == IndividualState.INFECTED
         ]
+
         for _ in infected_neighbors:
             if np.random.rand() >= self.beta:
                 continue
@@ -232,7 +233,7 @@ if __name__ == "__main__":
     simulations: "dict[str, list[Simulation]]" = {}
 
     # beta is randomly selected everytime
-    betas = [np.random.choice(BETAS) for _ in range(COUNT_BETAS)]
+    betas = sorted([np.random.choice(BETAS) for _ in range(COUNT_BETAS)])
 
     for mi in MIS:
         for beta in betas:
@@ -240,63 +241,77 @@ if __name__ == "__main__":
             # to make combined plots in regards to beta
             simulations[str(beta)] = []
 
-            # we populate the simulations dict for each model <> kapa.
-            for kapa in KAPAS:
+            # we populate the simulations dict for each model <> kappa.
+            for kappa in KAPPAS:
                 for model_type in MODEL_TYPES:
                     model = (
-                        nx.erdos_renyi_graph(NUM_NODES, p=(kapa / (NUM_NODES - 1)))
+                        nx.erdos_renyi_graph(NUM_NODES, p=(kappa / (NUM_NODES - 1)))
                         if model_type == "ER"
-                        else nx.barabasi_albert_graph(NUM_NODES, m=(kapa // 2))
+                        else nx.barabasi_albert_graph(NUM_NODES, m=(kappa // 2))
                     )
 
-                    with open(f"model_{model_type}_k_{kapa}.gpickle", "wb") as f:
+                    with open(f"model_{model_type}_k_{kappa}.gpickle", "wb") as f:
                         pickle.dump(model, f, pickle.HIGHEST_PROTOCOL)
 
                     simulations[str(beta)].append(
                         Simulation(
                             mi=mi,
-                            kapa=kapa,
+                            kappa=kappa,
                             beta=beta,
                             model=model,
                             model_type=model_type,
                         )
                     )
 
-    # ready to run the simulation cases and plot
-    for beta in simulations.keys():
-        plt.figure(figsize=(10, 6))
-        for sim, color in zip(simulations[beta], COLORS):
+    er_k4_steady = []
+    er_k6_steady = []
+    ba_k4_steady = []
+    ba_k6_steady = []
 
+    # ready to run the simulation cases and plot
+    plt.figure(figsize=(10, 6))
+    for idx, beta in enumerate(simulations.keys()):
+        sim_idx = 1
+        for sim, color in zip(simulations[beta], COLORS):
             # focus on the main plot area and don't take
             # hard limits (0 to 1.0)
             max_lim = 0
             min_lim = 1.0
 
-            print("Running simulation:")
+            print(f"Beta Group:: [{idx+1}/{len(simulations.keys())}]")
+            print(f"Simulation:: [{sim_idx}/{len(simulations[beta])}]")
             print(f"\tmodel_type:: {sim.model_type}")
-            print(f"\tkapa:: {sim.kapa}")
+            print(f"\tkappa:: {sim.kappa}")
             print(f"\tmi:: {sim.mi}")
             print(f"\tbeta:: {sim.beta}")
 
+            sim_idx += 1
             simulator = Simulator(G=sim.model, mi=sim.mi, beta=sim.beta)
             mmca_res = simulator.run_mmca()
             print(f"\tmmca_res:: {mmca_res:.7f}\n")
 
             res = simulator.run()
-            plt.plot(
-                range(NUM_REPETITIONS),
-                res,
-                label=f"model_type={sim.model_type} (k={sim.kapa} | mmca={mmca_res:.7f}",
-                color=color,
-            )
-            max_lim = max_lim if max_lim >= max(res) else max(res)
-            min_lim = min_lim if min_lim <= min(res) else min(res)
+            steady_portion = res[int(0.8 * len(res)) :]
+            steady_state_value = np.mean(steady_portion)
 
-        plt.xlabel("t")
-        plt.ylabel("ρ")
-        plt.title(f"SIS (beta={beta}, N={NUM_NODES}, µ={sim.mi}, P0={P0})")
-        plt.ylim(max_lim - 0.1, max_lim + 0.1)
-        plt.legend()
-        plt.grid(True)
-        plt.tight_layout()
-        plt.savefig(f"SIS_simulation_beta_{beta}_N_{NUM_NODES}_mu_{sim.mi}_P0_{P0}.png")
+            if sim.model_type == "ER" and sim.kappa == 4:
+                er_k4_steady.append(steady_state_value)
+            elif sim.model_type == "ER" and sim.kappa == 6:
+                er_k6_steady.append(steady_state_value)
+            elif sim.model_type == "BA" and sim.kappa == 4:
+                ba_k4_steady.append(steady_state_value)
+            elif sim.model_type == "BA" and sim.kappa == 6:
+                ba_k6_steady.append(steady_state_value)
+
+    beta_values = [beta for beta in simulations.keys()]
+    plt.plot(beta_values, er_k4_steady, "b-o", label="ER k=4")
+    plt.plot(beta_values, er_k6_steady, "b--s", label="ER k=6")
+    plt.plot(beta_values, ba_k4_steady, "r-o", label="BA k=4")
+    plt.plot(beta_values, ba_k6_steady, "r--s", label="BA k=6")
+
+    plt.xlabel("Infectiousness β (lambda)")
+    plt.ylabel("Steady-state Infection Fraction")
+    plt.title("Epidemic Diagram")
+    plt.legend()
+    plt.grid(True)
+    plt.show()
